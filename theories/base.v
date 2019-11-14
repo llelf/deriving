@@ -580,3 +580,97 @@ Fixpoint hfun_eq I (T_ S_ : I -> Type) (e : forall i, T_ i = S_ i) ix R :
   | [::]    => erefl
   | i :: ix => congr2 (fun X Y => X -> Y) (e i) (hfun_eq e ix R)
   end.
+
+Section ClassLift.
+
+Variables (K : Type) (sort : K -> Type) (class_of : Type -> Type).
+Variables (Pack : forall T, class_of T -> K) (class : forall sT, class_of (sort sT)).
+Variables (I : Type) (T_ : I -> Type).
+
+Record index_lift T := IndexLift {
+  il_index : I;
+  _ : T = T_ il_index;
+}.
+
+Definition ilP T (ix : index_lift T) : T = T_ (il_index ix) :=
+  let: IndexLift _ e := ix in e.
+
+Canonical index_lift_refl i := @IndexLift (T_ i) _ erefl.
+
+Record class_lift := ClassLift {
+  cl_seq : seq I;
+  _ : forall i : fin (size cl_seq), {sT | sort sT = T_ (nth_fin i)};
+}.
+
+Definition clP (Ts : class_lift) :
+  forall i : fin (size (cl_seq Ts)), {sT | sort sT = T_ (nth_fin i)} :=
+  let: ClassLift _ sT_ := Ts in sT_.
+
+Canonical class_lift0 :=
+  @ClassLift [::] (fun i : void => match i with end).
+
+Canonical class_lift1 sT (ix : index_lift (sort sT)) (Ts : class_lift) :=
+  @ClassLift (il_index ix :: cl_seq Ts)
+    (fun i => match i with
+              | Some j => @clP Ts j
+              | None => exist _ sT (ilP ix)
+              end).
+
+Variables (sum_K : K -> K -> K).
+Variables (sum_KP : forall sT sS, sort (sum_K sT sS) = (sort sT + sort sS)%type).
+
+Variables (void_K : K).
+Variables (void_KP : sort void_K = void).
+
+Fixpoint hsum_lift_loop ix :
+  (forall j : fin (size ix), {sT | sort sT = T_ (nth_fin j)}) ->
+  {sT | sort sT = hsum T_ ix} :=
+  match ix with
+  | [::] => fun sT => exist _ void_K void_KP
+  | i :: ix => fun sT =>
+    let sT' := hsum_lift_loop (fun j => sT (Some j)) in
+    exist _ (sum_K (sval (sT None)) (sval sT'))
+            (sum_KP (sval (sT None)) (sval sT') *
+             congr2 sum (svalP (sT None)) (svalP sT'))
+  end.
+
+Variables (cell_K : K -> K -> K).
+Variables (cell_KP : forall sT sS, sort (cell_K sT sS) = cell (sort sT) (sort sS)).
+
+Variables (unit_K : K).
+Variables (unit_KP : sort unit_K = unit).
+
+Fixpoint hlist_lift_loop ix :
+  (forall j : fin (size ix), {sT | sort sT = T_ (nth_fin j)}) ->
+  {sT | sort sT = hlist T_ ix} :=
+  match ix with
+  | [::] => fun sT => exist _ unit_K unit_KP
+  | i :: ix => fun sT =>
+    let sT' := hlist_lift_loop (fun j => sT (Some j)) in
+    exist _ (cell_K (sval (sT None)) (sval sT'))
+            (cell_KP (sval (sT None)) (sval sT') *
+             congr2 cell (svalP (sT None)) (svalP sT'))
+  end.
+
+End ClassLift.
+
+Definition hsum_lift K sort I T_ ix sum_K sum_KP void_K void_KP :=
+  @hsum_lift_loop K sort I T_ sum_K sum_KP void_K void_KP _ (@clP _ _ _ _ ix).
+Definition hlist_lift K sort I T_ ix cell_K cell_KP unit_K unit_KP :=
+  @hlist_lift_loop K sort I T_ cell_K cell_KP unit_K unit_KP _ (@clP _ _ _ _ ix).
+
+Arguments hsum_lift {K sort I T_} _ _ _ _ _.
+Arguments hlist_lift {K sort I T_} _ _ _ _ _.
+
+Section HSumInstances.
+
+Variables (I : Type) (T_ : I -> Type).
+
+Definition hsum_eqMixin (ix : class_lift Equality.sort T_) :=
+  let lift := hsum_lift ix sum_eqType (fun _ _ => erefl) void_eqType erefl in
+  cast Equality.mixin_of (svalP lift) (Equality.class (sval lift)).
+
+Canonical hsum_eqType ix :=
+  EqType (hsum T_ (cl_seq ix)) (hsum_eqMixin ix).
+
+End HSumInstances.
